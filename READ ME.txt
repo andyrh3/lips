@@ -1,0 +1,19 @@
+###########################################
+###########################################
+Application: LIPS v1.01  ##################
+Author: Andrew Harrison  ##################
+Contact: 07860822479     ##################
+###########################################
+###########################################
+
+Prerequisites:
+1. Ensure lastest JVM (Java Virtual Machine) is installed on your computer. You install it for FREE from https://java.com/en/download/
+
+Running the application:
+1. Inside the root folder of the application, place the Excel bible files you want to process into the excel folder
+2. Double-click the XXXXXX.exe file
+3. A dialogue window will open with a command line prefilled as below:-
+
+>> java xxxxx.jar --weekstodept 8 --dests PMI,LPA --origs LGW,MAN
+
+4. 
