@@ -75,8 +75,164 @@ Example Response:
 
 -----------------------------------------------------
 
-WIZAIR deeplink:
-https://wizzair.com/en-gb/flights/timetable/LTN/SOF#/0/0/2017-11/2018-10
+BLUEAIR
+
+https://webapi.blueairweb.com/api/RetrieveSchedule?o=BHX&d=LCA
+
+Example Response:
+
+{
+    "basicSchedule": {
+        "schedules": [
+
+	{
+            "key": {
+                "end": "2018-10-28 00:00:00",
+                "name": "summer 2018",
+                "start": "2018-03-26 00:00:00"
+            },
+            "value": [{
+                "arrivalHour": "17:35",
+                "dayOfWeek": "Tuesday",
+                "numberOfStops": 0,
+                "startHour": "11:00"
+            },{
+                "arrivalHour": "17:35",
+                "dayOfWeek": "Thursday",
+                "numberOfStops": 0,
+                "startHour": "11:00"
+            }, {
+                "arrivalHour": "23:20",
+                "dayOfWeek": "Saturday",
+                "numberOfStops": 0,
+                "startHour": "16:45"
+            }, {
+                "arrivalHour": "17:35",
+                "dayOfWeek": "Sunday",
+                "numberOfStops": 0,
+                "startHour": "11:00"
+            }]
+        }, 
+
+
+
+{
+            "key": {
+                "end": "2019-03-25 00:00:00",
+                "name": "winter 2018",
+                "start": "2018-10-29 00:00:00"
+            },
+            "value": [{
+                "arrivalHour": "17:35",
+                "dayOfWeek": "Tuesday",
+                "numberOfStops": 0,
+                "startHour": "10:55"
+            }, {
+                "arrivalHour": "17:35",
+                "dayOfWeek": "Thursday",
+                "numberOfStops": 0,
+                "startHour": "10:55"
+            }, {
+                "arrivalHour": "23:20",
+                "dayOfWeek": "Saturday",
+                "numberOfStops": 0,
+                "startHour": "16:40"
+            }]
+        }]
+    }
+}
+
+-----------------------------------------------------
+PRIMERA AIR POST request:
+https://primeraair.co.uk/api/data
+
+Payload example:
+
+{"method": 3, "wid": 975396, "departure": "KEF", "destination": "BHX", "channel": "ASG"}
+
+Example response:
+
+{
+    "Error": null,
+    "ErrorDescription": null,
+    "WebId": "WF10",
+    "Data": [{
+        "flightDate": "2018-12-06",
+        "availability": 118
+    }, {
+        "flightDate": "2018-12-13",
+        "availability": 118
+    }, {
+        "flightDate": "2018-12-23",
+        "availability": 112
+    }, {
+        "flightDate": "2019-01-05",
+        "availability": 120
+    }, {
+        "flightDate": "2019-01-17",
+        "availability": 118
+    }, {
+        "flightDate": "2019-01-24",
+        "availability": 116
+    }, {
+        "flightDate": "2019-01-31",
+        "availability": 120
+    }, {
+        "flightDate": "2019-02-07",
+        "availability": 118
+    }, {
+        "flightDate": "2019-02-14",
+        "availability": 116
+    }, {
+        "flightDate": "2019-02-21",
+        "availability": 118
+    }, {
+        "flightDate": "2019-02-28",
+        "availability": 120
+    }, {
+        "flightDate": "2019-03-07",
+        "availability": 119
+    }, {
+        "flightDate": "2019-03-14",
+        "availability": 116
+    }, {
+        "flightDate": "2019-03-21",
+        "availability": 120
+    }, {
+        "flightDate": "2019-03-28",
+        "availability": 120
+    }, {
+        "flightDate": "2019-04-04",
+        "availability": 120
+    }],
+    "HasError": false
+}
+
+
+-----------------------------------------------------
+
+WIZAIR deeplink: POST
+
+https://be.wizzair.com/8.2.0/Api/search/timetable
+
+42 days ahead only!!!
+
+PAYLOAD: 
+
+{
+    "flightList": [{
+        "departureStation": "LTN",
+        "arrivalStation": "SOF",
+        "from": "2018-08-10",
+        "to": "2018-09-21"
+    }],
+    "priceType": "regular",
+    "adultCount": 1,
+    "childCount": 0,
+    "infantCount": 0
+}
+
+
 
 Example response:
 

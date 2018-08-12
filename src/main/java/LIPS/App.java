@@ -3,6 +3,8 @@ package LIPS;
 import API.models.Airport;
 import API.models.Month;
 import API.models.Schedule;
+import API.models.wizzair.Payload;
+import API.models.wizzair.PayloadFlight;
 import Helpers.DateHelper;
 import Helpers.ExcelHelper;
 import Helpers.FileHelper;
@@ -10,6 +12,7 @@ import Helpers.TCALocationsHelper;
 import LIPS.models.*;
 import LIPSin.models.TpOpRoute;
 import LIPSin.models.TpOpSeason;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.*;
@@ -32,7 +35,6 @@ import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
-import org.jsoup.helper.HttpConnection;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -48,6 +50,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+
 import static Helpers.FileHelper.writeObjectToJSONFile;
 import static org.apache.http.protocol.HTTP.USER_AGENT;
 
@@ -98,15 +102,21 @@ public class App
         - TUI TOM DONE
         - Flybe BEE DONE
         - Easyjet EZY DONE
-        - Norweigen Airlines
-        - WizzAir
+        - Wizz Air
+        - Blue Air
+        - Primera Air
+        -
         */
         airlines.put("EZY", new OpAirline("Easyjet","EZY","http://www.easyjet.com/ejcms/cache15m/api/routedates/get/"));
         airlines.put("EXS", new OpAirline("Jet2", "EXS", "https://reservations.jet2.com/jet2.Reservations.web.portal/StandardSearchPageSmall.aspx/getFlyDates"));
         airlines.put("RYR", new OpAirline("Ryanair","RYR","https://api.ryanair.com/timetable/3/schedules/"));
         airlines.put("TOM", new OpAirline("Thomson","TOM","https://www.tui.co.uk/searchpanel/traveldates/fo"));
         airlines.put("BEE", new OpAirline("Flybe","BEE","https://www.flybe.com/timetableClassic/timetable.jsp"));
+        airlines.put("BMS", new OpAirline("Blue Air","BMS","https://webapi.blueairweb.com/api/RetrieveSchedule"));
+        airlines.put("WZZ", new OpAirline("Wizz Air","WZZ","https://be.wizzair.com/8.2.0/Api/search/timetable"));
+        airlines.put("PRI", new OpAirline("Primera Air","PRI","https://primeraair.co.uk/api/data"));
         airlines.put("TCX", new OpAirline("Thomas Cook","TCX",""));
+
         //Set airline specific date formats
         airlines.get("TOM").setDateFormatter("dd-MM-yyyy");
         airlines.get("BEE").setDateFormatter("dd-MMM-yy");
@@ -124,7 +134,7 @@ public class App
         System.out.println();
         System.out.println();
 
-        //Example args: --weekstodept 8 --dests PMI,LPA --origs LGW,MAN
+        //Example args: --weekstodept 8 --dests PMI --origs STN --airlines PRI
 
         String log4jConfigFile = System.getProperty("user.dir") + File.separator + "log4j.properties";
         PropertyConfigurator.configure(log4jConfigFile);
@@ -140,6 +150,9 @@ public class App
         }
         if(processedArgs.containsKey("origs")){
             processOrigins.addAll(Arrays.stream(processedArgs.get("origs").split(",")).collect(Collectors.toList()));
+        }
+        if(processedArgs.containsKey("airlines")){
+            processAirlines.addAll(Arrays.stream(processedArgs.get("airlines").split(",")).collect(Collectors.toList()));
         }
 
         // create a scanner so we can read the command-line input
@@ -215,6 +228,19 @@ public class App
         writeObjectToJSONFile(tcaUkRoutes, new File(jsonPath + "tca-routes.json"));
         //writeObjectToJSONFile(tcaUkRoutes, new File(jsonPath + "condor-es-routes.json"));
 
+        //Get FORCED routes - these are routes that TCA/Condor and Tour Ops do not service but are served by 3rd party airlines and so should be processed.
+        String filePathString = jsonPath + "forced-routes.json";
+        ObjectMapper mapper = new ObjectMapper();
+        File f = new File(filePathString);
+        LinkedHashMap<String, List<String>> forcedRoutesFromJsonFile = null;
+        try {
+            logger.info("Fetching forced-routes.json data from local cache!!!");
+            forcedRoutesFromJsonFile = mapper.readValue(f, new TypeReference<Map<String, List<String>>>(){});
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        LinkedHashMap<String, List<String>> forcedRoutes = forcedRoutesFromJsonFile;
+
         //Main data structure for building LIPS excel opportunities
         LinkedHashMap<String, OpSeason> LIPS = new LinkedHashMap<>();
 
@@ -223,6 +249,8 @@ public class App
 
         //Iterate through work workbook files
         //Iterator<Map.Entry<String, String>> workbookIterator = bibles.entrySet().iterator();
+
+
         bibleWorkbooks.forEach((String workbookSeason, AbstractMap.SimpleEntry workbook) -> {
             logger.info("Processing " + workbook.getKey());
             String workbookName = workbook.getKey().toString();
@@ -238,7 +266,8 @@ public class App
             LinkedHashMap<String, List<String>> bibleRoutes = fetchBibleRoutes(workbookName);
             writeObjectToJSONFile(bibleRoutes, new File(jsonPath + "bible-routes.json"));
 
-            LinkedHashMap<String, List<String>> mergedRoutes  = TCALocationsHelper.mergeLocations(bibleRoutes, tcaUkRoutes);
+            LinkedHashMap<String, List<String>> mergedRoutes  = TCALocationsHelper.mergeRoutes(bibleRoutes, tcaUkRoutes);
+            mergedRoutes = TCALocationsHelper.mergeRoutes(mergedRoutes, forcedRoutes);
             writeObjectToJSONFile(mergedRoutes, new File(jsonPath + "merged-routes.json"));
 
             //TCA Routes not serviced by Tour Ops
@@ -374,6 +403,7 @@ public class App
                     ArrayList<NameValuePair> airlineParams = new ArrayList<>();
                     URL airlineUrl;
                     Schedule schedule;
+                    LocalDate currentDate;
                     //Fetch airline schedules for route
                     switch (airline.getKey()) {
                         //Fetch Ryanair schedule
@@ -383,7 +413,7 @@ public class App
                             schedule.ScheduleStarted = true;
                             schedule.ScheduleEnded = false;
                             schedule.ScheduleUnknown = false;
-                            LocalDate currentDate = LocalDate.now().withDayOfMonth(1);
+                            currentDate = LocalDate.now().withDayOfMonth(1);
                             LocalDate seasonEndDate = DateHelper.convertDateToLocalDate(opSeason.getEndDate());
                             airlineParams.add(new BasicNameValuePair("destination", destAirportCode));
                             airlineParams.add(new BasicNameValuePair("origin", origAirportCode));
@@ -402,7 +432,7 @@ public class App
                                     airlineParams.add(new BasicNameValuePair("months", Integer.toString(currentDate.getMonthValue())));
                                 }
                                 try {
-                                    JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams);
+                                    JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
                                     Month month = new Month(currentDate.getYear(), currentDate.getMonthValue());
                                     schedule.addMonth(month);
                                     //json.get("days").getAsJsonArray().iterator().forEachRemaining(je -> je.getAsJsonObject().get());
@@ -447,9 +477,9 @@ public class App
                             airlineParams.add(new BasicNameValuePair("to[]", destAirportCode));
                             airlineParams.add(new BasicNameValuePair("from[]", origAirportCode));
                             try {
-                                JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams);
+                                JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
                                 //Shoehorn the json response into Easyjet schedule pojo
-                                schedule = buildAirlineSchedule(airline.getValue(), json);
+                                schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
                                 FileHelper.writeObjectToFile(schedule, f);
                                 FileHelper.writeObjectToJSONFile(schedule, j);
                                 airlineSchedules.put(airline.getKey(), schedule);
@@ -469,17 +499,125 @@ public class App
                                 getAirlineAirportMapping(airline.getValue());
                                 airlineParams.add(new BasicNameValuePair("destAirportId", destAirportCode));
                                 airlineParams.add(new BasicNameValuePair("origAirportId", origAirportCode));
-                                JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams);
+                                JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
                                 //Shoehorn the json response into Easyjet schedule pojo
                                 //Need to cache data as: key = airline + route pairs value = Schedule??? Too Big vs connectivity to airline website?
-                                schedule = buildAirlineSchedule(airline.getValue(), json);
+                                schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
                                 airlineSchedules.put(airline.getKey(), schedule);
                                 logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
                             } catch (Exception e) {
                                 e.printStackTrace();
                             }
                             break;
+                        /*Fetch Primera Air schedule*/
+                        case "PRI":
+                            //Do airline scrape as no rest exists
+                            logger.info("Trying to Capture " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode + " for season " + season);
+                            try {
+                                //{"method": 3, "wid": 975396, "departure": "KEF", "destination": "BHX", "channel": "ASG"}
+                                airlineParams.add(new BasicNameValuePair("destination", destAirportCode));
+                                airlineParams.add(new BasicNameValuePair("departure", origAirportCode));
+                                airlineParams.add(new BasicNameValuePair("channel", "ASG"));
+                                airlineParams.add(new BasicNameValuePair("wid", "975396"));
+                                airlineParams.add(new BasicNameValuePair("method", "3"));
+                                JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
+                                //Shoehorn the json response into Easyjet schedule pojo
+                                //Need to cache data as: key = airline + route pairs value = Schedule??? Too Big vs connectivity to airline website?
+                                schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
+                                FileHelper.writeObjectToFile(schedule, f);
+                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                airlineSchedules.put(airline.getKey(), schedule);
+                                logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            break;
+                        /*Fetch Blue Air schedule*/
+                        case "BMS":
+                            //Do airline scrape as no rest exists
+                            logger.info("Trying to Capture " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode + " for season " + season);
+                            try {
+                                //{"method": 3, "wid": 975396, "departure": "KEF", "destination": "BHX", "channel": "ASG"}
+                                airlineParams.add(new BasicNameValuePair("d", destAirportCode));
+                                airlineParams.add(new BasicNameValuePair("o", origAirportCode));
+                                JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
+                                //Shoehorn the json response into Easyjet schedule pojo
+                                //Need to cache data as: key = airline + route pairs value = Schedule??? Too Big vs connectivity to airline website?
+                                schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
+                                FileHelper.writeObjectToFile(schedule, f);
+                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                airlineSchedules.put(airline.getKey(), schedule);
+                                logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            break;
+                        /*Fetch Blue Air schedule*/
+                        case "WZZ":
+                            //Do airline scrape as no rest exists
+                            logger.info("Trying to Capture " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode + " for season " + season);
+                            try {
+                                airlineParams.add(new BasicNameValuePair("destination", destAirportCode));
+                                airlineParams.add(new BasicNameValuePair("origin", origAirportCode));
 
+                                LocalDate opSeasonEndDate = DateHelper.convertDateToLocalDate(opSeason.getEndDate());
+                                //LocalDate tempLocalDate = LocalDate.parse("31/12/2018", DateTimeFormatter.ofPattern("d/MM/yyyy"));
+
+                                //Wizz Air only returns back 42 days of results so we must start from today and plus days until we reach end of season.
+                                LocalDate startDate = LocalDate.now().atStartOfDay().toLocalDate();
+                                LocalDate endDate = startDate.plusDays(42);
+                                if(endDate.isAfter(opSeasonEndDate)){
+                                    endDate = opSeasonEndDate;
+                                }
+
+                                ArrayList<LocalDate> wizzLocalDates = new ArrayList<>();
+
+                                while(
+                                        ( endDate.isBefore(opSeasonEndDate) ||
+                                        endDate.isEqual(opSeasonEndDate) ) &&
+                                        ( startDate.isBefore(endDate) ||
+                                        startDate.isEqual(endDate) )
+                                ){
+                                    logger.info(startDate + ":" + endDate);
+                                    //Build payload
+                                    Payload payload = new Payload();
+                                    PayloadFlight payloadFlight = new PayloadFlight(origAirportCode, destAirportCode, startDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")), endDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+                                    payload.addFlight(payloadFlight);
+
+                                    //Build JSON payload and then ObjectMapper a request into wzzSchedule Class
+                                    JsonObject scheduleJsonResp = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, new Gson().toJson(payload));
+                                    //JSON from String to Object
+                                    API.models.wizzair.Schedule tempSchedule = new ObjectMapper().readValue(scheduleJsonResp.toString(), API.models.wizzair.Schedule.class);
+
+                                    wizzLocalDates.addAll((ArrayList<LocalDate>) tempSchedule.getOutboundFlights().stream().map(flight -> flight.getDepartureDateAsLocalDate()).collect(Collectors.toList()));
+
+                                    if(
+                                        ( endDate.plusDays(42).isBefore(opSeasonEndDate) ||
+                                        endDate.plusDays(42).isEqual(opSeasonEndDate) )
+                                    ){
+                                        startDate = endDate.plusDays(1);
+                                        endDate = endDate.plusDays(43);
+                                    }else{
+                                        startDate = endDate.plusDays(1);
+                                        endDate = opSeasonEndDate;
+                                    }
+                                }
+                                //Schedule shoehorn
+                                schedule = new Schedule();
+                                schedule.ScheduleStarted = true;
+                                schedule.ScheduleEnded = false;
+                                schedule.ScheduleUnknown = false;
+                                for(LocalDate localDate : wizzLocalDates){
+                                    buildAirlineScheduleMonth(schedule, localDate).FlightDates.add(localDate.getDayOfMonth());
+                                }
+                                FileHelper.writeObjectToFile(schedule, f);
+                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                airlineSchedules.put(airline.getKey(), schedule);
+                                logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            break;
                         case "BEE":
                             //Do airline scrape as no rest exists
                             airlineParams.add(new BasicNameValuePair("selDest", destAirportCode));
@@ -576,25 +714,64 @@ public class App
         logger.info("#### COMPLETED all available airline schedules for " + origAirportCode + "-" + destAirportCode + " for season " + season + "####");
     }
 
-    private static Schedule buildAirlineSchedule(OpAirline airline, JsonObject json){
+    private static Month buildAirlineScheduleMonth(Schedule schedule, LocalDate localDate) {
+        Month month = schedule.getMonth(localDate.getYear(), localDate.getMonthValue());
+        if (month == null) {
+            month = new Month(localDate.getYear(), localDate.getMonthValue());
+            schedule.addMonth(month);
+        }
+        return month;
+    }
+
+    private static Schedule buildAirlineSchedule(OpAirline airline, JsonObject json, OpSeason opSeason){
         Schedule schedule = new Schedule();
         schedule.ScheduleStarted = true;
         schedule.ScheduleEnded = false;
         schedule.ScheduleUnknown = false;
-        Month month = null;
         switch(airline.getCode()){
-
+            /* Thomson */
             case "TOM" :
                 for (JsonElement date : json.get("dates").getAsJsonArray()) {
                     LocalDate localDate = LocalDate.parse(date.getAsString(), DateTimeFormatter.ofPattern("dd-MM-yyyy"));
-                    if(month==null || month.MonthNumber!=localDate.getMonthValue() || month.YearNumber!=localDate.getYear()) {
-                        month = schedule.getMonth(localDate.getYear(), localDate.getMonthValue());
-                        if (month == null) {
-                            month = new Month(localDate.getYear(), localDate.getMonthValue());
-                            schedule.addMonth(month);
+                    buildAirlineScheduleMonth(schedule, localDate).FlightDates.add(localDate.getDayOfMonth());
+                }
+                break;
+            /* Primera Air */
+            case "PRI" :
+                for (JsonElement date : json.getAsJsonArray("Data")){
+                    if(Integer.parseInt(date.getAsJsonObject().get("availability").getAsString())!=0) {
+                        LocalDate localDate = LocalDate.parse(date.getAsJsonObject().get("flightDate").getAsString(), DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                        buildAirlineScheduleMonth(schedule, localDate).FlightDates.add(localDate.getDayOfMonth());
+                    }
+                }
+                break;
+            /* Blue Air */
+            case "BMS" :
+                for (JsonElement jsonSchedule : json.getAsJsonObject("basicSchedule").getAsJsonArray("schedules")){
+                    LocalDate scheduleStartDate = LocalDate.parse(jsonSchedule.getAsJsonObject().get("key").getAsJsonObject().get("start").getAsString(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                    LocalDate scheduleEndDate = LocalDate.parse(jsonSchedule.getAsJsonObject().get("key").getAsJsonObject().get("end").getAsString(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                    LocalDate today = LocalDate.now().atStartOfDay().toLocalDate();
+                    //If the schedule start date is before today set it to today
+                    if(scheduleStartDate.isBefore(today)){
+                        scheduleStartDate = today;
+                    }
+                    //If BMS schedule is within the current opSeason then build schedule
+                    if(
+                            ( scheduleStartDate.isEqual(DateHelper.convertDateToLocalDate(opSeason.getStartDate())) || scheduleStartDate.isAfter(DateHelper.convertDateToLocalDate(opSeason.getStartDate()))) &&
+                            ( scheduleEndDate.isEqual(DateHelper.convertDateToLocalDate(opSeason.getEndDate())) || scheduleEndDate.isBefore(DateHelper.convertDateToLocalDate(opSeason.getEndDate())))
+                    ) {
+                        Month month = null;
+                        while(scheduleStartDate.isBefore(scheduleEndDate) || scheduleStartDate.isEqual(scheduleEndDate)){
+                            jsonSchedule.getAsJsonObject().get("value").getAsJsonArray();  //.get("dayOfWeek");
+                            List<String> operatedDaysOfWeek = StreamSupport.stream(jsonSchedule.getAsJsonObject().get("value").getAsJsonArray().spliterator(), false).map(value -> value.getAsJsonObject().get("dayOfWeek").getAsString().toUpperCase()).collect(Collectors.toList());
+                            if(operatedDaysOfWeek.contains(scheduleStartDate.getDayOfWeek().name())){
+                                month = buildAirlineScheduleMonth(schedule, scheduleStartDate);
+                                month.FlightDates.add(scheduleStartDate.getDayOfMonth());
+                            }
+                            //Forward the date on
+                            scheduleStartDate = scheduleStartDate.plusDays(1);
                         }
                     }
-                    month.FlightDates.add(localDate.getDayOfMonth());
                 }
                 break;
 			/* Jet2 */
@@ -730,14 +907,16 @@ public class App
 
 
     // HTTP POST request
-    private static JsonObject airlineRouteScheduleJsonRequest(OpAirline airline, ArrayList<NameValuePair> params) throws Exception {
+    private static JsonObject airlineRouteScheduleJsonRequest(OpAirline airline, ArrayList<NameValuePair> params, String payload) throws Exception {
         JsonObject jsonObject = new JsonObject();
         JsonArray jsonArray = new JsonArray();
         String url = airline.getUrl();
+        String aSReqPayload = "";
         Connection aSReq = Jsoup.connect(url).ignoreContentType(true);
-
+        StringBuilder urlIncParams = new StringBuilder(url);
+        AtomicInteger paramCount = new AtomicInteger();
         aSReq.headers(
-        new HashMap<String, String>()
+            new HashMap<String, String>()
             {
                 {
                     put("Content-Type", "application/json");
@@ -750,13 +929,25 @@ public class App
             case "Jet2" :
                                 aSReq.request().removeHeader("Accept-Encoding").removeHeader("User-Agent");
                                 aSReq.method(Connection.Method.POST);
-                                String aSReqPayload = "{" + params.stream().map(a -> "\"" + a.getName() + "\":\"" + (airline.getAirportMapping().getOrDefault(a.getValue(), new Airport("","",""))).getMapping() + "\"").collect(Collectors.joining(",")) + "}";
+                                aSReqPayload = "{" + params.stream().map(a -> "\"" + a.getName() + "\":\"" + (airline.getAirportMapping().getOrDefault(a.getValue(), new Airport("","",""))).getMapping() + "\"").collect(Collectors.joining(",")) + "}";
                                 aSReq.requestBody(aSReqPayload);
                                 //Jet2 payload example: {origAirportId:'16',destAirportId:'4'}
                                 break;
+            case "Primera Air" :
+                                aSReq.request().removeHeader("Accept-Encoding").removeHeader("User-Agent");
+                                aSReq.method(Connection.Method.POST);
+                                aSReqPayload = "{" + params.stream().map(a -> "\"" + a.getName() + "\":\"" + a.getValue() + "\"").collect(Collectors.joining(",")) + "}";
+                                aSReq.requestBody(aSReqPayload);
+                                //Jet2 payload example: {origAirportId:'16',destAirportId:'4'}
+                                break;
+
+            case "Wizz Air" :   aSReq.request().removeHeader("Accept-Encoding").removeHeader("User-Agent");
+                                aSReq.method(Connection.Method.POST);
+                                //pre-constructed payload
+                                aSReq.requestBody(payload);
+                                break;
+
             case "Ryanair" :    aSReq.method(Connection.Method.GET);
-                                StringBuilder urlIncParams = new StringBuilder(url);
-                                AtomicInteger paramCount = new AtomicInteger();
                                 params.forEach(param -> {
                                     if(!param.getName().equalsIgnoreCase("origin") && !param.getName().equalsIgnoreCase("destination")){
                                         urlIncParams.append(param.getName() + "/");
@@ -769,24 +960,16 @@ public class App
                                 });
                                 aSReq.url(urlIncParams.toString());
                                 break;
+
             default :
-                                aSReq.method(Connection.Method.GET);
-                                StringBuilder urlIncQuery = new StringBuilder(url + "?");
-                                params.forEach(param -> urlIncQuery.append(param.getName()).append("=").append(param.getValue()).append("&"));
-                                aSReq.url(urlIncQuery.toString());
-                                break;
+                //Airlines such as Blue Air uses typical GET request
+                aSReq.method(Connection.Method.GET);
+                StringBuilder urlIncQuery = new StringBuilder(url + "?");
+                params.forEach(param -> urlIncQuery.append(param.getName()).append("=").append(param.getValue()).append("&"));
+                aSReq.url(urlIncQuery.toString());
+                break;
         }
-/*        if(airline.getName().equals("Jet2")){
-            aSReq.requestBody("{" + params.stream().map(a -> "\"" + a.getName() + "\":\"" + (airline.getAirportMapping().getOrDefault(a.getValue(), new Airport("","",""))).getMapping() + "\"").collect(Collectors.joining(",")) + "}");
-            //Jet2 payload example: {origAirportId:'16',destAirportId:'4'}
-        }
-        //GET - where simple GET request is available
-        else{
-            aSReq.method(Connection.Method.GET);
-            StringBuilder urlIncQuery = new StringBuilder(url + "?");
-            params.forEach(param -> urlIncQuery.append(param.getName()).append("=").append(param.getValue()).append("&"));
-            aSReq.url(urlIncQuery.toString());
-        }*/
+
         String aSRes = aSReq.execute().body();
         try {
             jsonObject = new JsonParser().parse(aSRes).getAsJsonObject();

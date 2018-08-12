@@ -176,7 +176,7 @@ public class TCALocationsHelper {
         return null;
     }
 
-    private static JSONObject getJson(File f) {
+    public static JSONObject getJson(File f) {
         InputStream is;
         JSONObject json = null;
         try {
@@ -189,15 +189,15 @@ public class TCALocationsHelper {
         return json;
     }
 
-    public static LinkedHashMap<String, List<String>> mergeLocations(LinkedHashMap<String, List<String>> bibleRoutes, LinkedHashMap<String, List<String>> tcaUkRoutes) {
-        for (Map.Entry<String, List<String>> entry : bibleRoutes.entrySet() ) {
+    public static LinkedHashMap<String, List<String>> mergeRoutes(LinkedHashMap<String, List<String>> routes, LinkedHashMap<String, List<String>> mergedRoutes) {
+        for (Map.Entry<String, List<String>> entry : routes.entrySet() ) {
             //System.out.println("KEY:" + entry.getKey() + "::" + entry.getValue());
-            if(!tcaUkRoutes.containsKey(entry.getKey())){
+            if(!mergedRoutes.containsKey(entry.getKey())){
                 //Bible destination is not airline so add it and it's origin airports
-                tcaUkRoutes.put(entry.getKey(), entry.getValue());
+                mergedRoutes.put(entry.getKey(), entry.getValue());
             }else{
                 //Add bible origins to the existing destination
-                List<String> tcaUKRoutesDestinationOrigins = tcaUkRoutes.get(entry.getKey());
+                List<String> tcaUKRoutesDestinationOrigins = mergedRoutes.get(entry.getKey());
                 for (String originAirportCode : entry.getValue()){
                     if(!tcaUKRoutesDestinationOrigins.contains(originAirportCode)){
                         tcaUKRoutesDestinationOrigins.add(originAirportCode);
@@ -206,7 +206,7 @@ public class TCALocationsHelper {
                 tcaUKRoutesDestinationOrigins.sort(String.CASE_INSENSITIVE_ORDER);
             }
         }
-        return tcaUkRoutes;
+        return mergedRoutes;
     }
 
     public static LinkedHashMap<String, List<String>> charteredRoutes(LinkedHashMap<String, List<String>> bibleRoutes, LinkedHashMap<String, List<String>> tcaRoutes) {
