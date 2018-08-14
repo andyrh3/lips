@@ -28,6 +28,7 @@ public class Schedule implements Serializable{
 		@Expose public boolean ScheduleEnded;
 		@JsonProperty("Months")
 		@Expose public ArrayList<Month> Months = new ArrayList<>();
+		@Expose public ArrayList<String> DaysOfweek = new ArrayList<>();
 		@JsonProperty("DateCreated")
 		@Expose public LocalDate DateCreated;
 
@@ -49,6 +50,10 @@ public class Schedule implements Serializable{
 		
 		public void addMonth(Month month) {
 			Months.add(month);
+		}
+
+		public void addDayofWeek(String dayOfWeek){
+			this.DaysOfweek.add(dayOfWeek);
 		}
 		
 }

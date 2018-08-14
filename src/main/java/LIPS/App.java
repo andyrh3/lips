@@ -113,7 +113,7 @@ public class App
         airlines.put("TOM", new OpAirline("Thomson","TOM","https://www.tui.co.uk/searchpanel/traveldates/fo"));
         airlines.put("BEE", new OpAirline("Flybe","BEE","https://www.flybe.com/timetableClassic/timetable.jsp"));
         airlines.put("BMS", new OpAirline("Blue Air","BMS","https://webapi.blueairweb.com/api/RetrieveSchedule"));
-        airlines.put("WZZ", new OpAirline("Wizz Air","WZZ","https://be.wizzair.com/8.2.0/Api/search/timetable"));
+        airlines.put("WZZ", new OpAirline("Wizz Air","WZZ","https://be.wizzair.com/8.2.1/Api/search/timetable"));
         airlines.put("PRI", new OpAirline("Primera Air","PRI","https://primeraair.co.uk/api/data"));
         airlines.put("TCX", new OpAirline("Thomas Cook","TCX",""));
 
@@ -319,7 +319,7 @@ public class App
                             logger.info(">>>>>>>>> PROCESSING ROUTE: " + origAirportCode + "-" + destAirportCode + " <<<<<<<<");
                             OpAirport opOrigAirport = new OpAirport(origAirportCode, "out");
                             opDestAirport.addAirport(opOrigAirport);
-                            //Fetch all airline schedules for season and route!!!!
+                            //####### All airline schedules get added to GLOBAL airlineSchedules #######
                             getRouteAirlineSchedules(airlines, workbookSeason, opSeason, origAirportCode, destAirportCode);
                             if (wb != null) {
                                 traverseFlightBible(wb, opSeason, opOrigAirport, opDestAirport);
@@ -402,17 +402,16 @@ public class App
                     logger.info("Caching schedule data for: " + airline.getValue().getName() + " schedule for " + season + "-" + origAirportCode + "-" + destAirportCode + " as it was last modified: " + fileLastModified + " - please wait! ...");
                     ArrayList<NameValuePair> airlineParams = new ArrayList<>();
                     URL airlineUrl;
-                    Schedule schedule;
+                    Schedule schedule = new Schedule();
+                    schedule.ScheduleStarted = true;
+                    schedule.ScheduleEnded = false;
+                    schedule.ScheduleUnknown = false;
                     LocalDate currentDate;
                     //Fetch airline schedules for route
                     switch (airline.getKey()) {
                         //Fetch Ryanair schedule
                         case "RYR":
                             logger.info("Capturing " + airline.getValue().getName() + " schedule for " + season + "-" + origAirportCode + "-" + destAirportCode);
-                            schedule = new Schedule();
-                            schedule.ScheduleStarted = true;
-                            schedule.ScheduleEnded = false;
-                            schedule.ScheduleUnknown = false;
                             currentDate = LocalDate.now().withDayOfMonth(1);
                             LocalDate seasonEndDate = DateHelper.convertDateToLocalDate(opSeason.getEndDate());
                             airlineParams.add(new BasicNameValuePair("destination", destAirportCode));
@@ -424,7 +423,6 @@ public class App
                                     airlineParams.set(existingParams.indexOf("years"), new BasicNameValuePair("years", Integer.toString(currentDate.getYear())));
                                 } else {
                                     airlineParams.add(new BasicNameValuePair("years", Integer.toString(currentDate.getYear())));
-
                                 }
                                 if (existingParams.contains("months")) {
                                     airlineParams.set(existingParams.indexOf("months"), new BasicNameValuePair("months", Integer.toString(currentDate.getMonthValue())));
@@ -444,9 +442,17 @@ public class App
                                 }
                                 currentDate = currentDate.plusMonths(1);
                             }
-                            FileHelper.writeObjectToFile(schedule, f);
-                            FileHelper.writeObjectToJSONFile(schedule, j);
+                            //Add days of week to schedule for info purposes only
+                            for(Month scheduleMonth : schedule.getMonths()){
+                                for(int scheduleDay : scheduleMonth.FlightDates) {
+                                    schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                }
+                            }
                             airlineSchedules.put(airline.getKey(), schedule);
+                            if(schedule.getMonths().size()>0) {
+                                FileHelper.writeObjectToFile(schedule, f);
+                                FileHelper.writeObjectToJSONFile(schedule, j);
+                            }
                             logger.info("Captured " + airline.getValue().getName() + " schedule for " + season + "-" + origAirportCode + "-" + destAirportCode);
                             break;
                         //Fetch EasyJet schedule
@@ -459,11 +465,18 @@ public class App
                                 ObjectMapper objectMapper = new ObjectMapper();
                                 objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
                                 schedule = objectMapper.readValue(IOUtils.toString(airlineUrl.openStream(), "UTF-8"), Schedule.class);
-                                //Cache schedule to file
-                                FileHelper.writeObjectToFile(schedule, f);
-                                FileHelper.writeObjectToJSONFile(schedule, j);
                                 if (!schedule.ScheduleUnknown) {
+                                    //Add days of week to schedule for info purposes only
+                                    for(Month scheduleMonth : schedule.getMonths()){
+                                        for(int scheduleDay : scheduleMonth.FlightDates) {
+                                            schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                        }
+                                    }
                                     airlineSchedules.put(airline.getKey(), schedule);
+                                    if(schedule.getMonths().size()>0) {
+                                        FileHelper.writeObjectToFile(schedule, f);
+                                        FileHelper.writeObjectToJSONFile(schedule, j);
+                                    }
                                 } else {
                                     logger.info(airline.getValue().getName() + " does not operate " + origAirportCode + "-" + destAirportCode + " for season " + season);
                                 }
@@ -480,9 +493,17 @@ public class App
                                 JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
                                 //Shoehorn the json response into Easyjet schedule pojo
                                 schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
-                                FileHelper.writeObjectToFile(schedule, f);
-                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                //Add days of week to schedule for info purposes only
+                                for(Month scheduleMonth : schedule.getMonths()){
+                                    for(int scheduleDay : scheduleMonth.FlightDates) {
+                                        schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                    }
+                                }
                                 airlineSchedules.put(airline.getKey(), schedule);
+                                if(schedule.getMonths().size()>0) {
+                                    FileHelper.writeObjectToFile(schedule, f);
+                                    FileHelper.writeObjectToJSONFile(schedule, j);
+                                }
                                 logger.info("Captured " + airline.getValue().getName() + " schedule for " + season + "-" + origAirportCode + "-" + destAirportCode);
                             } catch (Exception e) {
                                 e.printStackTrace();
@@ -501,9 +522,18 @@ public class App
                                 airlineParams.add(new BasicNameValuePair("origAirportId", origAirportCode));
                                 JsonObject json = airlineRouteScheduleJsonRequest(airline.getValue(), airlineParams, null);
                                 //Shoehorn the json response into Easyjet schedule pojo
-                                //Need to cache data as: key = airline + route pairs value = Schedule??? Too Big vs connectivity to airline website?
                                 schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
+                                //Add days of week to schedule for info purposes only
+                                for(Month scheduleMonth : schedule.getMonths()){
+                                    for(int scheduleDay : scheduleMonth.FlightDates) {
+                                        schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                    }
+                                }
                                 airlineSchedules.put(airline.getKey(), schedule);
+                                if(schedule.getMonths().size()>0) {
+                                    FileHelper.writeObjectToFile(schedule, f);
+                                    FileHelper.writeObjectToJSONFile(schedule, j);
+                                }
                                 logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
                             } catch (Exception e) {
                                 e.printStackTrace();
@@ -524,9 +554,17 @@ public class App
                                 //Shoehorn the json response into Easyjet schedule pojo
                                 //Need to cache data as: key = airline + route pairs value = Schedule??? Too Big vs connectivity to airline website?
                                 schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
-                                FileHelper.writeObjectToFile(schedule, f);
-                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                //Add days of week to schedule for info purposes only
+                                for(Month scheduleMonth : schedule.getMonths()){
+                                    for(int scheduleDay : scheduleMonth.FlightDates) {
+                                        schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                    }
+                                }
                                 airlineSchedules.put(airline.getKey(), schedule);
+                                if(schedule.getMonths().size()>0) {
+                                    FileHelper.writeObjectToFile(schedule, f);
+                                    FileHelper.writeObjectToJSONFile(schedule, j);
+                                }
                                 logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
                             } catch (Exception e) {
                                 e.printStackTrace();
@@ -544,9 +582,17 @@ public class App
                                 //Shoehorn the json response into Easyjet schedule pojo
                                 //Need to cache data as: key = airline + route pairs value = Schedule??? Too Big vs connectivity to airline website?
                                 schedule = buildAirlineSchedule(airline.getValue(), json, opSeason);
-                                FileHelper.writeObjectToFile(schedule, f);
-                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                //Add days of week to schedule for info purposes only
+                                for(Month scheduleMonth : schedule.getMonths()){
+                                    for(int scheduleDay : scheduleMonth.FlightDates) {
+                                        schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                    }
+                                }
                                 airlineSchedules.put(airline.getKey(), schedule);
+                                if(schedule.getMonths().size()>0) {
+                                    FileHelper.writeObjectToFile(schedule, f);
+                                    FileHelper.writeObjectToJSONFile(schedule, j);
+                                }
                                 logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
                             } catch (Exception e) {
                                 e.printStackTrace();
@@ -589,8 +635,9 @@ public class App
                                     //JSON from String to Object
                                     API.models.wizzair.Schedule tempSchedule = new ObjectMapper().readValue(scheduleJsonResp.toString(), API.models.wizzair.Schedule.class);
 
-                                    wizzLocalDates.addAll((ArrayList<LocalDate>) tempSchedule.getOutboundFlights().stream().map(flight -> flight.getDepartureDateAsLocalDate()).collect(Collectors.toList()));
-
+                                    if(tempSchedule.getOutboundFlights() != null) {
+                                        wizzLocalDates.addAll((ArrayList<LocalDate>) tempSchedule.getOutboundFlights().stream().map(flight -> flight.getDepartureDateAsLocalDate()).collect(Collectors.toList()));
+                                    }
                                     if(
                                         ( endDate.plusDays(42).isBefore(opSeasonEndDate) ||
                                         endDate.plusDays(42).isEqual(opSeasonEndDate) )
@@ -603,19 +650,24 @@ public class App
                                     }
                                 }
                                 //Schedule shoehorn
-                                schedule = new Schedule();
-                                schedule.ScheduleStarted = true;
-                                schedule.ScheduleEnded = false;
-                                schedule.ScheduleUnknown = false;
                                 for(LocalDate localDate : wizzLocalDates){
                                     buildAirlineScheduleMonth(schedule, localDate).FlightDates.add(localDate.getDayOfMonth());
                                 }
-                                FileHelper.writeObjectToFile(schedule, f);
-                                FileHelper.writeObjectToJSONFile(schedule, j);
+                                //Add days of week to schedule for info purposes only
+                                for(Month scheduleMonth : schedule.getMonths()){
+                                    for(int scheduleDay : scheduleMonth.FlightDates) {
+                                        schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                    }
+                                }
                                 airlineSchedules.put(airline.getKey(), schedule);
+                                if(schedule.getMonths().size()>0) {
+                                    FileHelper.writeObjectToFile(schedule, f);
+                                    FileHelper.writeObjectToJSONFile(schedule, j);
+                                }
                                 logger.info("Captured " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
                             } catch (Exception e) {
                                 e.printStackTrace();
+                                logger.info("NO SUCH ROUTE: " + airline.getValue().getName() + " schedule for " + origAirportCode + "-" + destAirportCode);
                             }
                             break;
                         case "BEE":
@@ -627,10 +679,6 @@ public class App
                                 HttpClient clientGet = HttpClientBuilder.create().build();
                                 HttpGet get = new HttpGet(airlineUrl.toString());
                                 HttpResponse res = clientGet.execute(get);
-                                schedule = new Schedule();
-                                schedule.ScheduleStarted = true;
-                                schedule.ScheduleEnded = false;
-                                schedule.ScheduleUnknown = false;
                                 Month month;
                                 Document doc = Jsoup.parse(IOUtils.toString(res.getEntity().getContent(), String.valueOf(StandardCharsets.UTF_8)));
                                 String selDest = doc.select("select[name=selDest] option[selected]").text();
@@ -691,9 +739,17 @@ public class App
                                     }
                                     //Add BEE schedule to airlines
                                     if (!schedule.ScheduleUnknown && schedule.Months.size() > 0) {
-                                        FileHelper.writeObjectToFile(schedule, f);
-                                        FileHelper.writeObjectToJSONFile(schedule, j);
+                                        //Add days of week to schedule for info purposes only
+                                        for(Month scheduleMonth : schedule.getMonths()){
+                                            for(int scheduleDay : scheduleMonth.FlightDates) {
+                                                schedule.addDayofWeek(LocalDate.of(scheduleMonth.YearNumber, scheduleMonth.MonthNumber, scheduleDay).getDayOfWeek().name());
+                                            }
+                                        }
                                         airlineSchedules.put(airline.getKey(), schedule);
+                                        if(schedule.getMonths().size()>0) {
+                                            FileHelper.writeObjectToFile(schedule, f);
+                                            FileHelper.writeObjectToJSONFile(schedule, j);
+                                        }
                                     }
                                 }
                             } catch (IOException e) {
@@ -762,8 +818,10 @@ public class App
                     ) {
                         Month month = null;
                         while(scheduleStartDate.isBefore(scheduleEndDate) || scheduleStartDate.isEqual(scheduleEndDate)){
-                            jsonSchedule.getAsJsonObject().get("value").getAsJsonArray();  //.get("dayOfWeek");
                             List<String> operatedDaysOfWeek = StreamSupport.stream(jsonSchedule.getAsJsonObject().get("value").getAsJsonArray().spliterator(), false).map(value -> value.getAsJsonObject().get("dayOfWeek").getAsString().toUpperCase()).collect(Collectors.toList());
+                            if(operatedDaysOfWeek.size()==0){
+                                break;
+                            }
                             if(operatedDaysOfWeek.contains(scheduleStartDate.getDayOfWeek().name())){
                                 month = buildAirlineScheduleMonth(schedule, scheduleStartDate);
                                 month.FlightDates.add(scheduleStartDate.getDayOfMonth());
@@ -1102,7 +1160,7 @@ public class App
 
                         //For duplicate OpDay rows check to see if the new row start date is after those already stored in OpDay
                         if (
-                                ( rowStartDate != null && rowEndDate != null && (opDay.getOpRanges().isEmpty() || DateHelper.convertDateToLocalDate(opDay.getOpRanges().getLast().getEndDate()).isBefore(rowStartDate)) )
+                                ( rowStartDate != null && rowEndDate != null && (opDay.getOpRanges().isEmpty() || DateHelper.convertDateToLocalDate(opDay.getOpRanges().getLast().getEndDate()).isBefore(opDayCurrentOccurrenceDate)) )
                                 //TODO: IS IT FIXED??? Need to fix BUG that doesn't pick up end opportunities!!!! GLA-CFU!!!
                                 || (rowStartDate == null && rowEndDate == null && !opDay.getOpRanges().isEmpty())
                             ) {
